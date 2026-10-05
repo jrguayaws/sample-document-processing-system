@@ -1,0 +1,15 @@
+@using System.Reflection
+@using System.Runtime.Versioning
+
+@* The framework the app was compiled for, e.g. ".NET 10.0". *@
+<span class="runtime-pill">
+    <i class="bi bi-cpu"></i>
+    @FrameworkName
+</span>
+
+@code {
+    private static readonly string FrameworkName =
+        typeof(RuntimeIndicator).Assembly.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkDisplayName is { Length: > 0 } name
+            ? name
+            : ".NET";
+}

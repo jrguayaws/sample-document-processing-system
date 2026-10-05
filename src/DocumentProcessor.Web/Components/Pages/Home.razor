@@ -1,0 +1,183 @@
+@page "/"
+@using DocumentProcessor.Web.Data
+@using DocumentProcessor.Web.Services
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Logging
+@inject IDbContextFactory<AppDbContext> DbContextFactory
+@inject IDocumentStorage Storage
+@inject DocumentPipeline Pipeline
+@inject TimeProvider TimeProvider
+@inject ILogger<Home> Logger
+@rendermode InteractiveServer
+
+<PageTitle>Document Processor</PageTitle>
+
+<div class="app-grid">
+    <section>
+        <DocumentUploader IsUploading="_isUploading"
+                          Notifications="_notifications"
+                          OnUpload="UploadAsync"
+                          OnNotify="Notify" />
+    </section>
+
+    <section>
+        <DocumentList Documents="_documents"
+                      IsLoading="_isLoading"
+                      OnRefresh="LoadDocumentsAsync"
+                      OnViewSummary="doc => _summaryTarget = doc"
+                      OnDelete="doc => _deleteTarget = doc" />
+    </section>
+</div>
+
+@if (_summaryTarget is not null)
+{
+    <ModalDialog Title="@_summaryTarget.OriginalFileName" OnClose="() => _summaryTarget = null">
+        <ChildContent>
+            <p>@_summaryTarget.Summary</p>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-sm btn-secondary" @onclick="() => _summaryTarget = null">Close</button>
+        </Footer>
+    </ModalDialog>
+}
+
+@if (_deleteTarget is not null)
+{
+    <ModalDialog Title="Delete document?" SizeClass="modal-sm" OnClose="() => _deleteTarget = null">
+        <ChildContent>
+            <p class="mb-0"><strong>@_deleteTarget.OriginalFileName</strong></p>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-sm btn-secondary" @onclick="() => _deleteTarget = null" disabled="@_isDeleting">Cancel</button>
+            <button class="btn btn-sm btn-danger" @onclick="DeleteAsync" disabled="@_isDeleting">
+                @if (_isDeleting)
+                {
+                    <span class="spinner-border spinner-border-sm"></span>
+                }
+                else
+                {
+                    <span>Delete</span>
+                }
+            </button>
+        </Footer>
+    </ModalDialog>
+}
+
+@code {
+    private const int MaxDocumentsShown = 50;
+
+    private readonly List<Notification> _notifications = [];
+    private IReadOnlyList<Document> _documents = [];
+    private Document? _summaryTarget;
+    private Document? _deleteTarget;
+    private bool _isLoading = true;
+    private bool _isUploading;
+    private bool _isDeleting;
+
+    protected override Task OnInitializedAsync() => LoadDocumentsAsync();
+
+    private async Task LoadDocumentsAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            _documents = await db.Documents
+                .OrderByDescending(d => d.UploadedAt)
+                .Take(MaxDocumentsShown)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not load documents.");
+            _documents = [];
+            Notify(new Notification("Could not load documents.", NotificationLevel.Danger));
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task UploadAsync(IReadOnlyList<IBrowserFile> files)
+    {
+        _isUploading = true;
+        _notifications.Clear();
+        StateHasChanged();
+
+        foreach (var file in files)
+        {
+            try
+            {
+                var document = await SaveAsync(file);
+                await Pipeline.ProcessAsync(document.Id);
+                Notify(new Notification($"'{file.Name}' processed", NotificationLevel.Success));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Upload failed for {FileName}.", file.Name);
+                Notify(new Notification($"'{file.Name}' failed to upload", NotificationLevel.Danger));
+            }
+        }
+
+        _isUploading = false;
+        await LoadDocumentsAsync();
+    }
+
+    private async Task<Document> SaveAsync(IBrowserFile file)
+    {
+        var document = new Document
+        {
+            FileName = file.Name,
+            OriginalFileName = file.Name,
+            FileExtension = Path.GetExtension(file.Name).ToLowerInvariant(),
+            ContentType = file.ContentType,
+            FileSize = file.Size,
+            UploadedAt = TimeProvider.GetUtcNow(),
+            Status = DocumentStatus.Pending
+        };
+
+        await using var content = file.OpenReadStream(file.Size);
+        document.StoragePath = await Storage.SaveAsync(content, file.Name);
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        return document;
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_deleteTarget is null) return;
+
+        var documentId = _deleteTarget.Id;
+        _isDeleting = true;
+        StateHasChanged();
+
+        try
+        {
+            // Soft delete: AppDbContext filters out IsDeleted rows globally.
+            await using var db = await DbContextFactory.CreateDbContextAsync();
+            await db.Documents
+                .Where(d => d.Id == documentId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(d => d.IsDeleted, true));
+
+            _deleteTarget = null;
+            await LoadDocumentsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Delete failed for document {DocumentId}.", documentId);
+            Notify(new Notification("Could not delete the document.", NotificationLevel.Danger));
+        }
+        finally
+        {
+            _isDeleting = false;
+        }
+    }
+
+    private void Notify(Notification notification) => _notifications.Add(notification);
+}

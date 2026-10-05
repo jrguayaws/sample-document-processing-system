@@ -1,0 +1,44 @@
+@page "/Error"
+@using System.Diagnostics
+@using Microsoft.AspNetCore.Diagnostics
+@using Microsoft.Extensions.Hosting
+@inject IHostEnvironment HostEnvironment
+
+<PageTitle>Error</PageTitle>
+
+<div class="container mt-5">
+    <h1 class="text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Something went wrong</h1>
+    <p class="lead">An unexpected error occurred while processing your request.</p>
+
+    @if (!string.IsNullOrEmpty(RequestId))
+    {
+        <p>
+            <strong>Request ID:</strong> <code>@RequestId</code>
+        </p>
+    }
+
+    @if (HostEnvironment.IsDevelopment() && Exception is not null)
+    {
+        <div class="alert alert-warning">
+            <strong>@Exception.GetType().Name:</strong> @Exception.Message
+        </div>
+    }
+
+    <a href="/" class="btn btn-primary">Back to documents</a>
+</div>
+
+@code {
+    // Static SSR on purpose: this page must render even when the interactive
+    // circuit is unavailable, which is often the case when an error occurs.
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private Exception? Exception { get; set; }
+
+    protected override void OnInitialized()
+    {
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+        Exception = HttpContext?.Features.Get<IExceptionHandlerPathFeature>()?.Error;
+    }
+}

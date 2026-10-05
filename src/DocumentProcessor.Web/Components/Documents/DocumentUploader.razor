@@ -1,0 +1,125 @@
+@using DocumentProcessor.Web.Configuration
+@using DocumentProcessor.Web.Models
+@using DocumentProcessor.Web.Services
+@using Microsoft.Extensions.Options
+@inject IOptions<StorageOptions> StorageOptions
+
+<h1 class="upload-title">Upload a document and I'll summarize it.</h1>
+<p class="upload-subtitle">@FileTypeSummary · up to @_options.MaxFileSizeMegabytes MB</p>
+
+<div class="dropzone">
+    <InputFile OnChange="SelectFiles" multiple accept="@AcceptAttribute"
+               class="dropzone-input" title="Drag files here or click to browse" />
+    <div class="dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+    <p class="dropzone-hint">Drag files here</p>
+    <span class="btn-brand">Browse files</span>
+</div>
+
+@if (_selected.Count > 0)
+{
+    <ul class="selected-list">
+        @foreach (var file in _selected)
+        {
+            <li class="selected-item" @key="file">
+                <small>@file.Name (@FormatSize(file.Size))</small>
+                <button class="btn-icon btn-icon-delete" title="Remove"
+                        @onclick="() => _selected.Remove(file)" disabled="@IsUploading">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </li>
+        }
+    </ul>
+    <div class="d-flex gap-2 mt-3">
+        <button class="btn-brand" @onclick="Upload" disabled="@IsUploading">
+            @if (IsUploading)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span><span>Uploading...</span>
+            }
+            else
+            {
+                <span>Upload @_selected.Count file(s)</span>
+            }
+        </button>
+        <button class="btn-quiet" @onclick="() => _selected.Clear()" disabled="@IsUploading">Clear</button>
+    </div>
+}
+
+@foreach (var notification in Notifications)
+{
+    <div class="notice notice-@notification.CssSuffix">
+        <i class="bi @NoticeIcon(notification.Level)"></i>
+        <span>@notification.Text</span>
+    </div>
+}
+
+@code {
+    private readonly List<IBrowserFile> _selected = [];
+    private StorageOptions _options = null!;
+
+    [Parameter] public bool IsUploading { get; set; }
+    [Parameter] public IReadOnlyList<Notification> Notifications { get; set; } = [];
+    [Parameter] public EventCallback<IReadOnlyList<IBrowserFile>> OnUpload { get; set; }
+    [Parameter] public EventCallback<Notification> OnNotify { get; set; }
+
+    protected override void OnInitialized() => _options = StorageOptions.Value;
+
+    private string AcceptAttribute => string.Join(", ", _options.AllowedExtensions);
+
+    private string FileTypeSummary =>
+        string.Join(", ", _options.AllowedExtensions.Select(e => e.TrimStart('.').ToUpperInvariant()));
+
+    private async Task SelectFiles(InputFileChangeEventArgs e)
+    {
+        _selected.Clear();
+
+        foreach (var file in e.GetMultipleFiles(_options.MaxFilesPerUpload))
+        {
+            if (file.Size > _options.MaxFileSizeBytes)
+            {
+                await Notify($"'{file.Name}' exceeds {_options.MaxFileSizeMegabytes} MB", NotificationLevel.Warning);
+                continue;
+            }
+
+            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+            if (!_options.AllowedExtensions.Contains(extension) || !DocumentTextExtractor.CanExtract(extension))
+            {
+                await Notify($"'{file.Name}' is not a supported file type", NotificationLevel.Warning);
+                continue;
+            }
+
+            _selected.Add(file);
+        }
+    }
+
+    private async Task Upload()
+    {
+        if (_selected.Count == 0) return;
+
+        await OnUpload.InvokeAsync(_selected.ToList());
+        _selected.Clear();
+    }
+
+    private Task Notify(string text, NotificationLevel level) =>
+        OnNotify.InvokeAsync(new Notification(text, level));
+
+    private static string NoticeIcon(NotificationLevel level) => level switch
+    {
+        NotificationLevel.Success => "bi-check-lg",
+        NotificationLevel.Danger => "bi-exclamation-octagon",
+        NotificationLevel.Warning => "bi-exclamation-triangle",
+        _ => "bi-info-circle"
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double size = bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+        return $"{size:0.##} {units[unit]}";
+    }
+}

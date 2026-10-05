@@ -1,0 +1,26 @@
+@using DocumentProcessor.Web.Models
+
+<span class="status-pill @CssClass">
+    <i class="bi @Icon"></i>@Status
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public DocumentStatus Status { get; set; }
+
+    private string CssClass => Status switch
+    {
+        DocumentStatus.Processed => "status-processed",
+        DocumentStatus.Processing => "status-processing",
+        DocumentStatus.Failed => "status-failed",
+        _ => "status-pending"
+    };
+
+    private string Icon => Status switch
+    {
+        DocumentStatus.Processed => "bi-check-lg",
+        DocumentStatus.Processing => "bi-hourglass-split",
+        DocumentStatus.Failed => "bi-x-lg",
+        _ => "bi-clock"
+    };
+}

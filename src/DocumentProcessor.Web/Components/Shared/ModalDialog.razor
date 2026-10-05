@@ -1,0 +1,23 @@
+<div class="modal fade show d-block modal-backdrop-tint" tabindex="-1" @onclick="OnClose">
+    <div class="modal-dialog @SizeClass" @onclick:stopPropagation="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title">@Title</h6>
+                <button type="button" class="btn-close" @onclick="OnClose"></button>
+            </div>
+            <div class="modal-body">@ChildContent</div>
+            @if (Footer is not null)
+            {
+                <div class="modal-footer">@Footer</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? SizeClass { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+}

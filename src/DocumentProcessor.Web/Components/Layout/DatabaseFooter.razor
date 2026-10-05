@@ -1,0 +1,8 @@
+@using DocumentProcessor.Web.Data
+@inject DatabaseInfo DatabaseInfo
+
+<footer class="app-footer">
+    Config: @DatabaseInfo.CredentialSource
+    <span class="app-footer-separator">·</span>
+    Summaries stored in @DatabaseInfo.DisplayName
+</footer>

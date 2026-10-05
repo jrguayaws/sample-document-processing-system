@@ -1,0 +1,69 @@
+<div class="list-header">
+    <h2 class="list-title">
+        Documents <span class="list-title-count">(@Documents.Count)</span>
+    </h2>
+    <button class="btn-quiet" @onclick="OnRefresh" disabled="@IsLoading">
+        <i class="bi bi-arrow-clockwise"></i>Refresh
+    </button>
+</div>
+
+@if (IsLoading)
+{
+    <div class="empty-state"><span class="spinner-border"></span></div>
+}
+else if (Documents.Count == 0)
+{
+    <p class="empty-state mb-0">No documents yet</p>
+}
+else
+{
+    @foreach (var document in Documents)
+    {
+        <article class="doc-card" @key="document.Id">
+            <span class="file-tag @(IsPdf(document.FileExtension) ? null : "file-tag-text")">
+                @Label(document.FileExtension)
+            </span>
+
+            <div class="doc-card-body">
+                <div class="doc-card-heading">
+                    <span class="doc-name" title="@document.OriginalFileName">@document.OriginalFileName</span>
+                    <StatusBadge Status="document.Status" />
+                </div>
+                <p class="doc-meta">
+                    <i class="bi bi-clock"></i>@Uploaded(document.UploadedAt)
+                </p>
+                <p class="doc-summary">@(string.IsNullOrWhiteSpace(document.Summary) ? "No summary yet." : document.Summary)</p>
+            </div>
+
+            <div class="doc-actions">
+                <button class="btn-icon btn-icon-view"
+                        title="View summary"
+                        disabled="@string.IsNullOrWhiteSpace(document.Summary)"
+                        @onclick="() => OnViewSummary.InvokeAsync(document)">
+                    <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn-icon btn-icon-delete" title="Delete" @onclick="() => OnDelete.InvokeAsync(document)">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>
+        </article>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<Document> Documents { get; set; } = [];
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback<Document> OnViewSummary { get; set; }
+    [Parameter] public EventCallback<Document> OnDelete { get; set; }
+
+    private static string Uploaded(DateTimeOffset uploadedAt) => uploadedAt == default
+        ? "Upload time unknown"
+        : uploadedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt");
+
+    private static bool IsPdf(string extension) =>
+        extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+
+    private static string Label(string extension) =>
+        extension.TrimStart('.').ToUpperInvariant() is { Length: > 0 } name ? name : "FILE";
+}

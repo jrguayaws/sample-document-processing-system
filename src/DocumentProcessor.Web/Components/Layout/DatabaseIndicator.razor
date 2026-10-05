@@ -1,0 +1,13 @@
+@using DocumentProcessor.Web.Data
+@inject DatabaseInfo DatabaseInfo
+
+@* Reports the engine the app is actually connected to; flips to the PostgreSQL
+   styling once the connection string points at Aurora. *@
+<span class="db-pill @(IsPostgres ? "db-pill-postgres" : null)">
+    <i class="bi @(IsPostgres ? "bi-rocket-takeoff-fill" : "bi-database")"></i>
+    @DatabaseInfo.DisplayName · @DatabaseInfo.LocationLabel
+</span>
+
+@code {
+    private bool IsPostgres => DatabaseInfo.Provider is DatabaseProvider.PostgreSql;
+}
