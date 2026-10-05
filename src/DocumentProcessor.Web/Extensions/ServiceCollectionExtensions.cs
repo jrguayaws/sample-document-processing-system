@@ -35,11 +35,9 @@ public static class ServiceCollectionExtensions
         // request, and a shared context cannot serve overlapping renders.
         services.AddDbContextFactory<AppDbContext>(options => _ = connection.Info.Provider switch
         {
-            DatabaseProvider.SqlServer => options.UseSqlServer(connection.ConnectionString),
-            // Wiring PostgreSQL means adding Npgsql.EntityFrameworkCore.PostgreSQL and
-            // calling UseNpgsql here. Fail loudly rather than hand Npgsql syntax to SqlClient.
+            DatabaseProvider.PostgreSql => options.UseNpgsql(connection.ConnectionString),
             _ => throw new NotSupportedException(
-                $"{connection.Info.DisplayName} is not wired up yet. Add the Npgsql EF Core provider and call UseNpgsql.")
+                $"{connection.Info.DisplayName} is not supported. Only PostgreSQL is configured.")
         });
         services.AddSingleton(connection.Info);
 
