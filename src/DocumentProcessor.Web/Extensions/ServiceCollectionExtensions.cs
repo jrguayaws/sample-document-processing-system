@@ -33,14 +33,8 @@ public static class ServiceCollectionExtensions
     {
         // A factory rather than a scoped DbContext: Blazor Server circuits outlive a
         // request, and a shared context cannot serve overlapping renders.
-        services.AddDbContextFactory<AppDbContext>(options => _ = connection.Info.Provider switch
-        {
-            DatabaseProvider.SqlServer => options.UseSqlServer(connection.ConnectionString),
-            // Wiring PostgreSQL means adding Npgsql.EntityFrameworkCore.PostgreSQL and
-            // calling UseNpgsql here. Fail loudly rather than hand Npgsql syntax to SqlClient.
-            _ => throw new NotSupportedException(
-                $"{connection.Info.DisplayName} is not wired up yet. Add the Npgsql EF Core provider and call UseNpgsql.")
-        });
+        services.AddDbContextFactory<AppDbContext>(options =>
+            options.UseNpgsql(connection.ConnectionString));
         services.AddSingleton(connection.Info);
 
         services.AddSingleton(TimeProvider.System);
