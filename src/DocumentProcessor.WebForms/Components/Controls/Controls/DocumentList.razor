@@ -1,0 +1,133 @@
+@using DocumentProcessor.WebForms.Models
+@using DocumentProcessor.WebForms.Controls
+
+<div class="list-header">
+    <h2 class="list-title">
+        Documents <span class="list-title-count">(@Documents.Count)</span>
+    </h2>
+    <button type="button" class="btn-quiet" @onclick="OnRefreshClicked">
+        <i class="bi bi-arrow-clockwise"></i>Refresh
+    </button>
+</div>
+
+@if (Documents.Count == 0)
+{
+    <p class="empty-state mb-0">No documents yet</p>
+}
+
+@foreach (var doc in Documents)
+{
+    <article class="doc-card">
+        <span class="file-tag @FileTagCss(doc.FileExtension)">
+            @FileLabel(doc.FileExtension)
+        </span>
+
+        <div class="doc-card-body">
+            <div class="doc-card-heading">
+                <span class="doc-name" title="@doc.OriginalFileName">
+                    @doc.OriginalFileName
+                </span>
+                <span class="status-pill @StatusCss(doc.Status)">
+                    <i class="bi @StatusIcon(doc.Status)"></i>@doc.Status
+                </span>
+            </div>
+            <p class="doc-meta">
+                <i class="bi bi-clock"></i>@UploadedText(doc.UploadedAt)
+            </p>
+            <p class="doc-summary">@SummaryPreview(doc.Summary)</p>
+        </div>
+
+        <div class="doc-actions">
+            <button type="button" class="btn-icon btn-icon-view" title="View summary"
+                    disabled="@(!HasSummary(doc.Summary))"
+                    @onclick="() => OnViewSummary(doc.Id)">
+                <i class="bi bi-eye"></i>
+            </button>
+            <button type="button" class="btn-icon btn-icon-delete" title="Delete"
+                    @onclick="() => OnDelete(doc.Id)">
+                <i class="bi bi-trash3"></i>
+            </button>
+        </div>
+    </article>
+}
+
+@code {
+    [Parameter] public IList<Document> Documents { get; set; } = new List<Document>();
+
+    [Parameter] public EventCallback RefreshRequested { get; set; }
+
+    [Parameter] public EventCallback<DocumentEventArgs> ViewSummaryRequested { get; set; }
+
+    [Parameter] public EventCallback<DocumentEventArgs> DeleteRequested { get; set; }
+
+    private async Task OnRefreshClicked()
+    {
+        await RefreshRequested.InvokeAsync();
+    }
+
+    private async Task OnViewSummary(Guid documentId)
+    {
+        await ViewSummaryRequested.InvokeAsync(new DocumentEventArgs(documentId));
+    }
+
+    private async Task OnDelete(Guid documentId)
+    {
+        await DeleteRequested.InvokeAsync(new DocumentEventArgs(documentId));
+    }
+
+    private string FileLabel(string? extension)
+    {
+        if (string.IsNullOrEmpty(extension))
+        {
+            return "FILE";
+        }
+
+        var label = extension.TrimStart('.').ToUpperInvariant();
+        return label.Length > 0 ? label : "FILE";
+    }
+
+    private string FileTagCss(string? extension)
+    {
+        var isPdf = string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase);
+        return isPdf ? string.Empty : "file-tag-text";
+    }
+
+    private string StatusCss(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.Processed => "status-processed",
+            DocumentStatus.Processing => "status-processing",
+            DocumentStatus.Failed => "status-failed",
+            _ => "status-pending"
+        };
+    }
+
+    private string StatusIcon(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.Processed => "bi-check-lg",
+            DocumentStatus.Processing => "bi-hourglass-split",
+            DocumentStatus.Failed => "bi-x-lg",
+            _ => "bi-clock"
+        };
+    }
+
+    private string UploadedText(DateTimeOffset uploadedAt)
+    {
+        return uploadedAt == default
+            ? "Upload time unknown"
+            : uploadedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt");
+    }
+
+    private string SummaryPreview(string? summary)
+    {
+        return string.IsNullOrWhiteSpace(summary) ? "No summary yet." : summary;
+    }
+
+    private bool HasSummary(string? summary)
+    {
+        return !string.IsNullOrWhiteSpace(summary);
+    }
+}

@@ -1,0 +1,260 @@
+@page "/"
+@page "/Default"
+@rendermode InteractiveServer
+@using DocumentProcessor.WebForms.Data
+@using DocumentProcessor.WebForms.Models
+@using DocumentProcessor.WebForms.Services
+@using Microsoft.EntityFrameworkCore
+@using DocumentProcessor.WebForms.Controls
+@using Microsoft.Extensions.Logging
+@inject IDbContextFactory<DocumentDbContext> DbFactory
+@inject IDocumentStorage Storage
+@inject DocumentPipeline Pipeline
+@inject ILogger<DocumentProcessor.WebForms.Components.Pages.Default> Logger
+
+<PageTitle>Document Processor</PageTitle>
+
+<div class="app-grid">
+    <section>
+        @* PORT-TODO *@
+        @* {"note": "Confirm DocumentUploader Blazor parameter names once the control is ported (UploadRequested as EventCallback<List<IBrowserFile>>, Notifications as List<Notification>).", "files": ["Components/Controls/DocumentUploader.razor"]} *@
+        <DocumentUploader UploadRequested="Uploader_UploadRequested" />
+    </section>
+
+    <section>
+        @* PORT-TODO *@
+        @* {"note": "Confirm DocumentList Blazor parameter names once the control is ported (Documents as IList<Document>, RefreshRequested/ViewSummaryRequested/DeleteRequested as EventCallback/EventCallback<Guid>).", "files": ["Components/Controls/DocumentList.razor"]} *@
+        <DocumentList Documents="documents"
+                      RefreshRequested="Documents_RefreshRequested"
+                      ViewSummaryRequested="Documents_ViewSummaryRequested"
+                      DeleteRequested="Documents_DeleteRequested" />
+
+        @if (showSummaryModal)
+        {
+            <div class="modal fade show d-block modal-backdrop-tint" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h6 class="modal-title">@summaryModalTitle</h6>
+                            <a href="#" class="btn-close" @onclick="CloseSummaryModal" @onclick:preventDefault></a>
+                        </div>
+                        <div class="modal-body">
+                            <p>@summaryModalBody</p>
+                        </div>
+                        <div class="modal-footer">
+                            <a href="#" class="btn btn-sm btn-secondary" @onclick="CloseSummaryModal" @onclick:preventDefault>Close</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (showDeleteModal)
+        {
+            <div class="modal fade show d-block modal-backdrop-tint" tabindex="-1">
+                <div class="modal-dialog modal-sm">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h6 class="modal-title">Delete document?</h6>
+                            <a href="#" class="btn-close" @onclick="CancelDelete" @onclick:preventDefault></a>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-0"><strong>@deleteModalFileName</strong></p>
+                        </div>
+                        <div class="modal-footer">
+                            <a href="#" class="btn btn-sm btn-secondary" @onclick="CancelDelete" @onclick:preventDefault>Cancel</a>
+                            <a href="#" class="btn btn-sm btn-danger" @onclick="ConfirmDelete" @onclick:preventDefault>Delete</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (isProcessing)
+        {
+            <div class="update-progress"><span class="spinner-border"></span></div>
+        }
+    </section>
+</div>
+
+@code {
+    private const int MaxDocumentsShown = 50;
+
+    private List<Document> documents = new();
+    private List<Notification> notifications = new();
+
+    // Summary modal state
+    private bool showSummaryModal;
+    private string summaryModalTitle = string.Empty;
+    private string summaryModalBody = string.Empty;
+
+    // Delete modal state
+    private bool showDeleteModal;
+    private string deleteModalFileName = string.Empty;
+    private Guid? deleteTargetId;
+
+    // Processing indicator
+    private bool isProcessing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDocumentsAsync();
+    }
+
+    private async Task Uploader_UploadRequested(IReadOnlyList<IBrowserFile> files)
+    {
+        isProcessing = true;
+        StateHasChanged();
+
+        foreach (var file in files)
+        {
+            var name = Path.GetFileName(file.Name);
+
+            try
+            {
+                var document = await StoreAsync(file, name);
+
+                await Pipeline.ProcessAsync(document.Id);
+
+                notifications.Add(new Notification($"'{name}' processed", NotificationLevel.Success));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Upload failed for {FileName}", name);
+                notifications.Add(new Notification($"'{name}' failed to upload", NotificationLevel.Danger));
+            }
+        }
+
+        await LoadDocumentsAsync();
+        isProcessing = false;
+    }
+
+    private async Task Documents_RefreshRequested()
+    {
+        await LoadDocumentsAsync();
+    }
+
+    private async Task Documents_ViewSummaryRequested(DocumentEventArgs args)
+    {
+        var documentId = args.DocumentId;
+        var document = await FindAsync(documentId);
+
+        if (document == null)
+        {
+            notifications.Add(new Notification("That document is no longer available.", NotificationLevel.Warning));
+            await LoadDocumentsAsync();
+            return;
+        }
+
+        summaryModalTitle = document.OriginalFileName;
+        summaryModalBody = document.Summary ?? string.Empty;
+        showSummaryModal = true;
+    }
+
+    private void CloseSummaryModal()
+    {
+        showSummaryModal = false;
+    }
+
+    private async Task Documents_DeleteRequested(DocumentEventArgs args)
+    {
+        var documentId = args.DocumentId;
+        var document = await FindAsync(documentId);
+
+        if (document == null)
+        {
+            notifications.Add(new Notification("That document is no longer available.", NotificationLevel.Warning));
+            await LoadDocumentsAsync();
+            return;
+        }
+
+        deleteTargetId = document.Id;
+        deleteModalFileName = document.OriginalFileName;
+        showDeleteModal = true;
+    }
+
+    private void CancelDelete()
+    {
+        deleteTargetId = null;
+        showDeleteModal = false;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (deleteTargetId is not Guid documentId)
+        {
+            showDeleteModal = false;
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var document = await db.Documents
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(d => d.Id == documentId && !d.IsDeleted);
+
+            if (document != null)
+            {
+                document.IsDeleted = true;
+                await db.SaveChangesAsync();
+            }
+
+            deleteTargetId = null;
+            showDeleteModal = false;
+            await LoadDocumentsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Delete failed for document {DocumentId}", documentId);
+            notifications.Add(new Notification("Could not delete the document.", NotificationLevel.Danger));
+        }
+    }
+
+    private async Task LoadDocumentsAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            documents = await db.Documents
+                .OrderByDescending(d => d.UploadedAt)
+                .Take(MaxDocumentsShown)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not load documents");
+            documents = new List<Document>();
+            notifications.Add(new Notification("Could not load documents.", NotificationLevel.Danger));
+        }
+    }
+
+    private async Task<Document?> FindAsync(Guid documentId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        return await db.Documents.FirstOrDefaultAsync(d => d.Id == documentId);
+    }
+
+    private async Task<Document> StoreAsync(IBrowserFile file, string name)
+    {
+        var document = new Document
+        {
+            FileName = name,
+            OriginalFileName = name,
+            FileExtension = Path.GetExtension(name).ToLowerInvariant(),
+            ContentType = file.ContentType,
+            FileSize = file.Size,
+            UploadedAt = DateTimeOffset.UtcNow,
+            Status = DocumentStatus.Pending
+        };
+
+        await using var stream = file.OpenReadStream(maxAllowedSize: file.Size);
+        document.StoragePath = Storage.Save(stream, name);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Documents.Add(document);
+        await db.SaveChangesAsync();
+
+        return document;
+    }
+}

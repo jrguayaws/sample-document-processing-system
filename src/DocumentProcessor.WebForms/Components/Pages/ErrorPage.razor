@@ -1,0 +1,32 @@
+@page "/ErrorPage"
+@rendermode InteractiveServer
+
+<PageTitle>Something went wrong</PageTitle>
+
+<div class="empty-state">
+    <h1>@headingText</h1>
+    <p>@messageText</p>
+    <a href="/" class="btn-brand">Back to documents</a>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "code")]
+    private string? Code { get; set; }
+
+    private string headingText = string.Empty;
+    private string messageText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        if (Code == "404")
+        {
+            headingText = "404 - Page Not Found";
+            messageText = "Sorry, there's nothing at this address.";
+        }
+        else
+        {
+            headingText = "Something went wrong";
+            messageText = "The error has been written to the application trace log.";
+        }
+    }
+}

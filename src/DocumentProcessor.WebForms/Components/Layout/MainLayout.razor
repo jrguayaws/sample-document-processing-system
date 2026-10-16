@@ -1,0 +1,81 @@
+@inherits LayoutComponentBase
+@using DocumentProcessor.WebForms.Data
+@using System.Reflection
+@using System.Runtime.Versioning
+
+<header class="app-bar">
+    <div class="app-brand">
+        <span class="app-brand-mark"><i class="bi bi-stars"></i></span>
+        <span>Document Processor</span>
+    </div>
+
+    @* Reports the engine the app is actually connected to; flips to the PostgreSQL
+       styling once the connection string points at Aurora. *@
+    <div class="app-bar-pills">
+        <span class="runtime-pill">
+            <i class="bi bi-cpu"></i>
+            @_runtimeName
+        </span>
+        <span class="@_databasePillClass">
+            <i class="@_databasePillIconClass"></i>
+            @_databasePillText
+        </span>
+    </div>
+</header>
+
+<main class="app-main">
+    @Body
+</main>
+
+<footer class="app-footer">
+    Config: @_credentialSourceText
+    <span class="app-footer-separator">&middot;</span>
+    Summaries stored in @_providerNameText
+</footer>
+
+@code {
+    // PORT-TODO
+    // {"was": "DocumentProcessor.WebForms.Data.DatabaseInfo", "note": "DatabaseInfo must be registered in DI (e.g. as a singleton resolved during startup in Program.cs from DatabaseConnectionResolver.Resolve()). Inject it here as a nullable dependency so the layout renders gracefully when it is not yet registered.", "files": ["Program.cs"]}
+    [Inject]
+    private DatabaseInfo? DatabaseInfoInstance { get; set; }
+
+    private string _runtimeName = string.Empty;
+    private string _databasePillClass = "db-pill";
+    private string _databasePillIconClass = "bi bi-database";
+    private string _databasePillText = string.Empty;
+    private string _credentialSourceText = string.Empty;
+    private string _providerNameText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _runtimeName = FrameworkName();
+
+        var info = DatabaseInfoInstance;
+
+        if (info == null)
+        {
+            _databasePillText = "Database not resolved";
+            _credentialSourceText = "unavailable";
+            _providerNameText = "no database";
+            return;
+        }
+
+        var isPostgres = info.Provider == DatabaseProvider.PostgreSql;
+
+        _databasePillClass = isPostgres ? "db-pill db-pill-postgres" : "db-pill";
+        _databasePillIconClass = isPostgres ? "bi bi-rocket-takeoff-fill" : "bi bi-database";
+
+        _databasePillText = info.DisplayName + " \u00b7 " + info.LocationLabel;
+        _credentialSourceText = info.CredentialSource;
+        _providerNameText = info.DisplayName;
+    }
+
+    /// <summary>The framework the app was compiled for, e.g. ".NET 10.0".</summary>
+    private static string FrameworkName()
+    {
+        var target = typeof(DocumentProcessor.WebForms.Components.Layout.MainLayout).Assembly.GetCustomAttribute<TargetFrameworkAttribute>();
+        return target != null && !string.IsNullOrEmpty(target.FrameworkDisplayName)
+            ? target.FrameworkDisplayName
+            : ".NET";
+    }
+}
