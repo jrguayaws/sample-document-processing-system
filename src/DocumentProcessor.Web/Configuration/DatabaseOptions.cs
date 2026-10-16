@@ -10,5 +10,5 @@ public sealed class DatabaseOptions
     /// </summary>
     public bool UseSecretsManager { get; init; }
 
-    public string SecretDescriptionPrefix { get; init; } = "Password for RDS PostgreSQL used for MAM417.";
+    public string SecretDescriptionPrefix { get; init; } = "Password for Aurora PostgreSQL used for MAM417.";
 }
