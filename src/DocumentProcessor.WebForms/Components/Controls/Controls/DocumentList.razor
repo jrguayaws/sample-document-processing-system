@@ -1,0 +1,158 @@
+@using DocumentProcessor.WebForms.Models
+
+<div class="list-header">
+    <h2 class="list-title">
+        Documents <span class="list-title-count">(@DocumentCount)</span>
+    </h2>
+    <button type="button" class="btn-quiet" @onclick="OnRefreshClick">
+        <i class="bi bi-arrow-clockwise"></i>Refresh
+    </button>
+</div>
+
+@if (DocumentCount == 0)
+{
+    <p class="empty-state mb-0">No documents yet</p>
+}
+
+@if (Documents is not null)
+{
+    @foreach (var document in Documents)
+    {
+        <article class="doc-card" @key="document.Id">
+            <span class="file-tag @FileTagCss(document.FileExtension)">
+                @FileLabel(document.FileExtension)
+            </span>
+
+            <div class="doc-card-body">
+                <div class="doc-card-heading">
+                    <span class="doc-name" title="@(document.OriginalFileName ?? string.Empty)">
+                        @(document.OriginalFileName ?? string.Empty)
+                    </span>
+                    <span class="status-pill @StatusCss(document.Status)">
+                        <i class="bi @StatusIcon(document.Status)"></i>@document.Status
+                    </span>
+                </div>
+                <p class="doc-meta">
+                    <i class="bi bi-clock"></i>@UploadedText(document.UploadedAt)
+                </p>
+                <p class="doc-summary">@SummaryPreview(document.Summary)</p>
+            </div>
+
+            <div class="doc-actions">
+                <button type="button" class="btn-icon btn-icon-view" title="View summary"
+                        disabled="@(!HasSummary(document.Summary))"
+                        @onclick="() => OnViewSummaryClick(document.Id)"><i class="bi bi-eye"></i></button>
+                <button type="button" class="btn-icon btn-icon-delete" title="Delete"
+                        @onclick="() => OnDeleteClick(document.Id)"><i class="bi bi-trash3"></i></button>
+            </div>
+        </article>
+    }
+}
+
+@code {
+    /// <summary>
+    /// The documents to display. Replaces the legacy <c>Bind(IList&lt;Document&gt;)</c> method:
+    /// the hosting page passes the list as a parameter and re-renders when it changes.
+    /// </summary>
+    [Parameter] public IList<Document>? Documents { get; set; }
+
+    [Parameter] public EventCallback RefreshRequested { get; set; }
+
+    [Parameter] public EventCallback<DocumentEventArgs> ViewSummaryRequested { get; set; }
+
+    [Parameter] public EventCallback<DocumentEventArgs> DeleteRequested { get; set; }
+
+    private int DocumentCount => Documents?.Count ?? 0;
+
+    private async Task OnRefreshClick()
+    {
+        if (RefreshRequested.HasDelegate)
+        {
+            await RefreshRequested.InvokeAsync();
+        }
+    }
+
+    private async Task OnViewSummaryClick(Guid documentId)
+    {
+        if (ViewSummaryRequested.HasDelegate)
+        {
+            await ViewSummaryRequested.InvokeAsync(new DocumentEventArgs(documentId));
+        }
+    }
+
+    private async Task OnDeleteClick(Guid documentId)
+    {
+        if (DeleteRequested.HasDelegate)
+        {
+            await DeleteRequested.InvokeAsync(new DocumentEventArgs(documentId));
+        }
+    }
+
+    // Razor HTML-encodes every @expression, so the legacy HttpUtility.HtmlEncode calls
+    // are dropped here to avoid double-encoding.
+    private static string FileLabel(string? extension)
+    {
+        if (string.IsNullOrEmpty(extension))
+        {
+            return "FILE";
+        }
+
+        var label = extension.TrimStart('.').ToUpperInvariant();
+        return label.Length > 0 ? label : "FILE";
+    }
+
+    private static string FileTagCss(string? extension)
+    {
+        var isPdf = string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase);
+        return isPdf ? string.Empty : "file-tag-text";
+    }
+
+    private static string StatusCss(DocumentStatus status)
+    {
+        switch (status)
+        {
+            case DocumentStatus.Processed:
+                return "status-processed";
+            case DocumentStatus.Processing:
+                return "status-processing";
+            case DocumentStatus.Failed:
+                return "status-failed";
+            default:
+                return "status-pending";
+        }
+    }
+
+    private static string StatusIcon(DocumentStatus status)
+    {
+        switch (status)
+        {
+            case DocumentStatus.Processed:
+                return "bi-check-lg";
+            case DocumentStatus.Processing:
+                return "bi-hourglass-split";
+            case DocumentStatus.Failed:
+                return "bi-x-lg";
+            default:
+                return "bi-clock";
+        }
+    }
+
+    private static string UploadedText(DateTimeOffset uploadedAt)
+    {
+        // The circuit runs on the server, so ToLocalTime() uses the server's time zone,
+        // exactly as the Web Forms control did.
+        return uploadedAt == default
+            ? "Upload time unknown"
+            : uploadedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt");
+    }
+
+    private static string SummaryPreview(string? summary)
+    {
+        return string.IsNullOrWhiteSpace(summary) ? "No summary yet." : summary;
+    }
+
+    private static bool HasSummary(string? summary)
+    {
+        return !string.IsNullOrWhiteSpace(summary);
+    }
+}

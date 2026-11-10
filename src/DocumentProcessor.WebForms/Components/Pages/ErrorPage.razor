@@ -1,0 +1,62 @@
+@page "/Error"
+@page "/ErrorPage"
+@page "/ErrorPage.aspx"
+@using global::Microsoft.AspNetCore.Diagnostics
+@using global::Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+
+@* Rendered statically (no interactive render mode) so it works when reached through
+   UseExceptionHandler("/Error") and UseStatusCodePagesWithReExecute("/Error", "?code={0}"),
+   which replace the legacy customErrors defaultRedirect and the 404 redirect. *@
+
+<PageTitle>Something went wrong</PageTitle>
+
+<div class="empty-state">
+    <h1>@headingText</h1>
+    <p>@messageText</p>
+    <a href="/" class="btn-brand">Back to documents</a>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    // Legacy customErrors redirected 404s to ~/ErrorPage.aspx?code=404.
+    [SupplyParameterFromQuery(Name = "code")]
+    private string? Code { get; set; }
+
+    private string headingText = string.Empty;
+    private string messageText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        var code = Code;
+
+        // When re-executed by the status-code-pages middleware without a query value,
+        // fall back to the original status code recorded on the request.
+        if (string.IsNullOrEmpty(code))
+        {
+            var reExecute = HttpContext?.Features.Get<IStatusCodeReExecuteFeature>();
+            if (reExecute is not null)
+            {
+                code = reExecute.OriginalStatusCode.ToString();
+            }
+            else if (HttpContext?.Features.Get<IExceptionHandlerPathFeature>() is null
+                     && HttpContext?.Response.StatusCode == StatusCodes.Status404NotFound)
+            {
+                code = "404";
+            }
+        }
+
+        if (code == "404")
+        {
+            headingText = "404 - Page Not Found";
+            messageText = "Sorry, there's nothing at this address.";
+        }
+        else
+        {
+            headingText = "Something went wrong";
+            messageText = "The error has been written to the application trace log.";
+        }
+    }
+}

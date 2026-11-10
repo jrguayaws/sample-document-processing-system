@@ -1,0 +1,239 @@
+@using System.IO
+@using Microsoft.Extensions.Configuration
+@using DocumentProcessor.WebForms.Models
+@using DocumentProcessor.WebForms.Services
+@inject IConfiguration Configuration
+
+<h1 class="upload-title">Upload a document and I'll summarize it.</h1>
+<p class="upload-subtitle">
+    @FileTypeSummaryText
+    &middot; up to @MaxFileSizeMegabytes MB
+</p>
+
+<div class="dropzone">
+    @* The file input is stretched over the whole zone by .dropzone-input, which is what
+       makes dropping files onto it work without any script. The @key lets "Clear" swap in
+       a fresh, empty input element. *@
+    <InputFile @key="_inputKey" id="FilePicker" multiple class="dropzone-input"
+               title="Drag files here or click to browse"
+               disabled="@_submitting"
+               OnChange="OnFilesSelected" />
+    <div class="dropzone-icon"><i class="bi bi-cloud-arrow-up"></i></div>
+    <p class="dropzone-hint">Drag files here</p>
+    <span class="btn-brand">Browse files</span>
+</div>
+
+<ul id="selectedList" class="selected-list">
+    @foreach (var file in _selected)
+    {
+        <li class="selected-item">
+            <small>@file.Name (@FormatSize(file.Size))</small>
+        </li>
+    }
+</ul>
+
+<div id="uploadActions" class="d-flex gap-2 mt-3" style="@(_selected.Count > 0 ? "" : "display: none;")">
+    <button type="button" id="UploadButton" class="@(_submitting ? "btn-brand is-busy" : "btn-brand")"
+            disabled="@_submitting" @onclick="UploadButton_Click">
+        @if (_submitting)
+        {
+            <span id="uploadBusyLabel">
+                <span class="spinner-border spinner-border-sm me-1"></span>Uploading...
+            </span>
+        }
+        else
+        {
+            <span id="uploadIdleLabel">@(_selected.Count == 1 ? "Upload 1 file" : $"Upload {_selected.Count} files")</span>
+        }
+    </button>
+    <button type="button" id="clearButton" class="btn-quiet" disabled="@_submitting" @onclick="Reset">Clear</button>
+</div>
+
+@* Summarizing happens while the upload is handled, so the wait can be long. Say so. *@
+@if (_submitting)
+{
+    <p id="uploadStatus" class="upload-status">
+        Uploading @_submittingCount @(_submittingCount == 1 ? "file" : "files").
+        Each document is summarized before the page updates, so this can take a while.
+        Leaving the page cancels it.
+    </p>
+}
+
+@foreach (var notice in _notifications)
+{
+    <div class="notice notice-@notice.CssSuffix">
+        <i class="bi @notice.IconClass"></i>
+        <span>@notice.Text</span>
+    </div>
+}
+
+@code {
+    private readonly List<Notification> _notifications = new List<Notification>();
+    private List<IBrowserFile> _selected = new List<IBrowserFile>();
+    private Guid _inputKey = Guid.NewGuid();
+    private bool _submitting;
+    private int _submittingCount;
+
+    /// <summary>
+    /// Raised once the selected files have passed size and extension checks. The page
+    /// stores them and runs the pipeline; this control only deals with the form.
+    /// Read each file with <c>OpenReadStream(MaxFileSizeBytes)</c> before this callback returns.
+    /// </summary>
+    [Parameter] public EventCallback<UploadEventArgs> UploadRequested { get; set; }
+
+    private string FileTypeSummaryText { get; set; } = string.Empty;
+
+    // Same keys and defaults as Configuration/AppSettings (Storage.*).
+    public int MaxFileSizeMegabytes => GetInt32("Storage.MaxFileSizeMegabytes", 50);
+
+    /// <summary>Pass this to <c>IBrowserFile.OpenReadStream(maxAllowedSize)</c>.</summary>
+    public long MaxFileSizeBytes => MaxFileSizeMegabytes * 1024L * 1024L;
+
+    private int MaxFilesPerUpload => GetInt32("Storage.MaxFilesPerUpload", 10);
+
+    private string[] AllowedExtensions
+    {
+        get
+        {
+            var raw = Configuration["Storage.AllowedExtensions"];
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                raw = ".pdf,.txt,.log";
+            }
+
+            return raw.Trim().Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        var extensions = AllowedExtensions
+            .Select(extension => extension.TrimStart('.').ToUpperInvariant());
+
+        // Razor encodes this on render; no manual HtmlEncode needed.
+        FileTypeSummaryText = string.Join(", ", extensions);
+    }
+
+    /// <summary>Adds a message shown under the dropzone.</summary>
+    public void Notify(string text, NotificationLevel level)
+    {
+        _notifications.Add(new Notification(text, level));
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        // Ask for every file the browser reported; the per-upload limit is enforced (with a
+        // warning) in UploadButton_Click, as before, rather than by throwing here.
+        _selected = e.FileCount > 0
+            ? e.GetMultipleFiles(e.FileCount).ToList()
+            : new List<IBrowserFile>();
+    }
+
+    private void Reset()
+    {
+        _selected = new List<IBrowserFile>();
+        _inputKey = Guid.NewGuid();
+    }
+
+    private async Task UploadButton_Click()
+    {
+        // A second click while the first upload is still running is ignored.
+        if (_submitting)
+        {
+            return;
+        }
+
+        // Each upload starts with a fresh set of messages, as each postback did.
+        _notifications.Clear();
+
+        var accepted = new List<IBrowserFile>();
+        var maxFiles = MaxFilesPerUpload;
+        var maxBytes = MaxFileSizeBytes;
+        var allowed = AllowedExtensions;
+
+        var posted = _selected
+            .Where(file => file != null && !string.IsNullOrEmpty(file.Name))
+            .ToList();
+
+        if (posted.Count == 0)
+        {
+            Notify("Choose at least one file to upload.", NotificationLevel.Warning);
+            return;
+        }
+
+        if (posted.Count > maxFiles)
+        {
+            Notify(
+                string.Format("Only the first {0} files were taken from this upload.", maxFiles),
+                NotificationLevel.Warning);
+
+            posted = posted.Take(maxFiles).ToList();
+        }
+
+        foreach (var file in posted)
+        {
+            var name = Path.GetFileName(file.Name);
+
+            if (file.Size > maxBytes)
+            {
+                Notify(
+                    string.Format("'{0}' exceeds {1} MB", name, MaxFileSizeMegabytes),
+                    NotificationLevel.Warning);
+                continue;
+            }
+
+            var extension = Path.GetExtension(name).ToLowerInvariant();
+
+            if (!allowed.Contains(extension) || !DocumentTextExtractor.CanExtract(extension))
+            {
+                Notify(
+                    string.Format("'{0}' is not a supported file type", name),
+                    NotificationLevel.Warning);
+                continue;
+            }
+
+            accepted.Add(file);
+        }
+
+        if (accepted.Count > 0 && UploadRequested.HasDelegate)
+        {
+            _submitting = true;
+            _submittingCount = posted.Count;
+            StateHasChanged();
+
+            try
+            {
+                // The file streams belong to the current <InputFile>, so the input is only
+                // reset after the consumer has finished reading them.
+                await UploadRequested.InvokeAsync(new UploadEventArgs(accepted));
+            }
+            finally
+            {
+                _submitting = false;
+                _submittingCount = 0;
+                Reset();
+            }
+        }
+    }
+
+    private int GetInt32(string key, int fallback)
+    {
+        var value = Configuration[key];
+        return string.IsNullOrWhiteSpace(value) ? fallback : int.Parse(value.Trim());
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        var units = new[] { "B", "KB", "MB", "GB" };
+        double size = bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size = size / 1024;
+            unit++;
+        }
+
+        return Math.Round(size, 2) + " " + units[unit];
+    }
+}

@@ -1,0 +1,86 @@
+@inherits LayoutComponentBase
+@using System.Reflection
+@using System.Runtime.Versioning
+@using DocumentProcessor.WebForms.Data
+@inject IServiceProvider Services
+
+@* Default title from the legacy TitleContent placeholder; a page's own <PageTitle> renders later and wins. *@
+<PageTitle>Document Processor</PageTitle>
+
+@* PORT-TODO *@
+@* {"note": "Site-wide head links from Site.Master belong in App.razor's <head>: Content/bootstrap.min.css, the bootstrap-icons CDN stylesheet (https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css), Content/Site.css (keep id=SiteStylesheet; the legacy code appended ?v=<last-write ticks> for cache busting - use @Assets[\"Content/Site.css\"] with MapStaticAssets instead), favicon.png (type image/png), and the script Scripts/bootstrap.bundle.min.js before the Blazor script. Verify they are present once App.razor is authored.", "files": ["Components/App.razor"]} *@
+
+<header class="app-bar">
+    <div class="app-brand">
+        <span class="app-brand-mark"><i class="bi bi-stars"></i></span>
+        <span>Document Processor</span>
+    </div>
+
+    @* Reports the engine the app is actually connected to; flips to the PostgreSQL
+       styling once the connection string points at Aurora. *@
+    <div class="app-bar-pills">
+        <span class="runtime-pill">
+            <i class="bi bi-cpu"></i>
+            @runtimePillText
+        </span>
+        <span id="DatabasePill" class="@databasePillClass">
+            <i id="DatabasePillIcon" class="@databasePillIconClass"></i>
+            @databasePillText
+        </span>
+    </div>
+</header>
+
+<main class="app-main">
+    @Body
+</main>
+
+<footer class="app-footer">
+    Config: @credentialSourceText
+    <span class="app-footer-separator">&middot;</span>
+    Summaries stored in @providerNameText
+</footer>
+
+@code {
+    private string runtimePillText = string.Empty;
+    private string databasePillClass = "db-pill";
+    private string databasePillIconClass = "bi bi-database";
+    private string databasePillText = string.Empty;
+    private string credentialSourceText = string.Empty;
+    private string providerNameText = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        runtimePillText = FrameworkName();
+
+        // DatabaseInfo is registered as a singleton in Program.cs (replaces Application["DatabaseInfo"]).
+        // Resolved optionally so the chrome still renders when the database could not be resolved.
+        var info = Services.GetService(typeof(DatabaseInfo)) as DatabaseInfo;
+
+        if (info == null)
+        {
+            databasePillText = "Database not resolved";
+            credentialSourceText = "unavailable";
+            providerNameText = "no database";
+            return;
+        }
+
+        var isPostgres = info.Provider == DatabaseProvider.PostgreSql;
+
+        databasePillClass = isPostgres ? "db-pill db-pill-postgres" : "db-pill";
+        databasePillIconClass = isPostgres ? "bi bi-rocket-takeoff-fill" : "bi bi-database";
+
+        // Razor encodes these values when rendering, replacing Server.HtmlEncode.
+        databasePillText = info.DisplayName + " · " + info.LocationLabel;
+        credentialSourceText = info.CredentialSource;
+        providerNameText = info.DisplayName;
+    }
+
+    /// <summary>The framework the app was compiled for, read from TargetFrameworkAttribute.</summary>
+    private static string FrameworkName()
+    {
+        var target = typeof(MainLayout).Assembly.GetCustomAttribute<TargetFrameworkAttribute>();
+        return target != null && !string.IsNullOrEmpty(target.FrameworkDisplayName)
+            ? target.FrameworkDisplayName
+            : ".NET";
+    }
+}

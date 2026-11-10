@@ -1,0 +1,279 @@
+@page "/"
+@page "/Default"
+@page "/Default.aspx"
+@rendermode InteractiveServer
+@using System.IO
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Logging
+@using DocumentProcessor.WebForms.Data
+@using DocumentProcessor.WebForms.Models
+@using DocumentProcessor.WebForms.Services
+@inject DocumentDbContext Db
+@inject IDocumentStorage Storage
+@inject DocumentPipeline Pipeline
+@inject ILogger<Default> Logger
+
+<PageTitle>Document Processor</PageTitle>
+
+<div class="app-grid">
+    <section>
+        <DocumentUploader @ref="Uploader" UploadRequested="Uploader_UploadRequested" />
+    </section>
+
+    <section>
+        @* The legacy UpdatePanel is gone: Blazor re-renders only what changed. *@
+        <DocumentList Documents="documents"
+                      RefreshRequested="Documents_RefreshRequested"
+                      ViewSummaryRequested="Documents_ViewSummaryRequested"
+                      DeleteRequested="Documents_DeleteRequested" />
+
+        @if (summaryModalVisible)
+        {
+            <div id="SummaryModal" tabindex="-1" class="modal fade show d-block modal-backdrop-tint">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h6 class="modal-title">@summaryModalTitle</h6>
+                            <a href="#" id="SummaryModalDismiss" class="btn-close"
+                               @onclick="CloseSummaryModal_Click" @onclick:preventDefault="true"></a>
+                        </div>
+                        <div class="modal-body">
+                            <p>@summaryModalBody</p>
+                        </div>
+                        <div class="modal-footer">
+                            <a href="#" id="SummaryModalClose" class="btn btn-sm btn-secondary"
+                               @onclick="CloseSummaryModal_Click" @onclick:preventDefault="true">Close</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (deleteModalVisible)
+        {
+            <div id="DeleteModal" tabindex="-1" class="modal fade show d-block modal-backdrop-tint">
+                <div class="modal-dialog modal-sm">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h6 class="modal-title">Delete document?</h6>
+                            <a href="#" id="DeleteModalDismiss" class="btn-close"
+                               @onclick="CancelDelete_Click" @onclick:preventDefault="true"></a>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-0"><strong>@deleteModalFileName</strong></p>
+                        </div>
+                        <div class="modal-footer">
+                            <a href="#" id="CancelDeleteButton" class="btn btn-sm btn-secondary"
+                               @onclick="CancelDelete_Click" @onclick:preventDefault="true">Cancel</a>
+                            <a href="#" id="ConfirmDeleteButton" class="btn btn-sm btn-danger"
+                               @onclick="ConfirmDelete_Click" @onclick:preventDefault="true">Delete</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* Replaces the UpdateProgress bound to the list panel. *@
+        @if (listBusy)
+        {
+            <div id="ListProgress" class="update-progress"><span class="spinner-border"></span></div>
+        }
+    </section>
+</div>
+
+@code {
+    private const int MaxDocumentsShown = 50;
+
+    private DocumentUploader? Uploader;
+
+    private List<Document> documents = new List<Document>();
+
+    private bool summaryModalVisible;
+    private string summaryModalTitle = string.Empty;
+    private string summaryModalBody = string.Empty;
+
+    private bool deleteModalVisible;
+    private string deleteModalFileName = string.Empty;
+
+    // Replaces ViewState["DeleteTargetId"].
+    private Guid? deleteTargetId;
+
+    private bool listBusy;
+
+    // PORT-TODO
+    // {"was": "DocumentProcessor.WebForms.Data.DocumentDbContext", "note": "The plan registers DocumentDbContext as a singleton, so every circuit shares one context instance, and a DbContext is not thread-safe. Consider registering IDbContextFactory<DocumentDbContext> (AddDbContextFactory) and creating a context per operation here and in DocumentPipeline.", "files": ["Program.cs", "Services/DocumentPipeline.cs"]}
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDocumentsAsync();
+    }
+
+    private async Task Uploader_UploadRequested(UploadEventArgs e)
+    {
+        var maxBytes = Uploader?.MaxFileSizeBytes ?? 50L * 1024L * 1024L;
+
+        foreach (var file in e.Files)
+        {
+            var name = Path.GetFileName(file.Name);
+
+            try
+            {
+                var document = await StoreAsync(file, name, maxBytes);
+
+                // The summary is produced before the list refreshes, as in the legacy page,
+                // but the call is asynchronous so the circuit thread is not blocked.
+                await Pipeline.ProcessAsync(document.Id);
+
+                Uploader?.Notify(string.Format("'{0}' processed", name), NotificationLevel.Success);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Upload failed for {FileName}.", name);
+                Uploader?.Notify(string.Format("'{0}' failed to upload", name), NotificationLevel.Danger);
+            }
+        }
+
+        await LoadDocumentsAsync();
+    }
+
+    private async Task Documents_RefreshRequested()
+    {
+        await LoadDocumentsAsync();
+    }
+
+    private async Task Documents_ViewSummaryRequested(DocumentEventArgs e)
+    {
+        var document = await FindAsync(e.DocumentId);
+
+        if (document == null)
+        {
+            Uploader?.Notify("That document is no longer available.", NotificationLevel.Warning);
+            await LoadDocumentsAsync();
+            return;
+        }
+
+        // Razor HTML-encodes these on render, replacing Server.HtmlEncode.
+        summaryModalTitle = document.OriginalFileName ?? string.Empty;
+        summaryModalBody = document.Summary ?? string.Empty;
+        summaryModalVisible = true;
+    }
+
+    private void CloseSummaryModal_Click()
+    {
+        summaryModalVisible = false;
+    }
+
+    private async Task Documents_DeleteRequested(DocumentEventArgs e)
+    {
+        var document = await FindAsync(e.DocumentId);
+
+        if (document == null)
+        {
+            Uploader?.Notify("That document is no longer available.", NotificationLevel.Warning);
+            await LoadDocumentsAsync();
+            return;
+        }
+
+        deleteTargetId = document.Id;
+        deleteModalFileName = document.OriginalFileName ?? string.Empty;
+        deleteModalVisible = true;
+    }
+
+    private void CancelDelete_Click()
+    {
+        deleteTargetId = null;
+        deleteModalVisible = false;
+    }
+
+    private async Task ConfirmDelete_Click()
+    {
+        if (deleteTargetId is not Guid documentId)
+        {
+            deleteModalVisible = false;
+            return;
+        }
+
+        try
+        {
+            // Soft delete; the global query filter in DocumentDbContext hides deleted rows.
+            var document = await Db.Documents.FirstOrDefaultAsync(d => d.Id == documentId);
+
+            if (document != null)
+            {
+                document.IsDeleted = true;
+                await Db.SaveChangesAsync();
+            }
+
+            deleteTargetId = null;
+            deleteModalVisible = false;
+            await LoadDocumentsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Delete failed for document {DocumentId}.", documentId);
+            Uploader?.Notify("Could not delete the document.", NotificationLevel.Danger);
+        }
+    }
+
+    private async Task LoadDocumentsAsync()
+    {
+        listBusy = true;
+
+        try
+        {
+            documents = await Db.Documents
+                .AsNoTracking()
+                .OrderByDescending(d => d.UploadedAt)
+                .Take(MaxDocumentsShown)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not load documents.");
+            documents = new List<Document>();
+            Uploader?.Notify("Could not load documents.", NotificationLevel.Danger);
+        }
+        finally
+        {
+            listBusy = false;
+        }
+    }
+
+    private async Task<Document?> FindAsync(Guid documentId)
+    {
+        return await Db.Documents
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+    }
+
+    private async Task<Document> StoreAsync(IBrowserFile file, string name, long maxBytes)
+    {
+        var document = new Document
+        {
+            FileName = name,
+            OriginalFileName = name,
+            FileExtension = Path.GetExtension(name).ToLowerInvariant(),
+            ContentType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            FileSize = file.Size,
+            UploadedAt = DateTimeOffset.UtcNow,
+            Status = DocumentStatus.Pending
+        };
+
+        // The browser file stream only supports asynchronous reads, while
+        // IDocumentStorage.Save reads synchronously, so buffer the upload first.
+        using (var buffer = new MemoryStream())
+        {
+            await using (var upload = file.OpenReadStream(maxBytes))
+            {
+                await upload.CopyToAsync(buffer);
+            }
+
+            buffer.Position = 0;
+            document.StoragePath = Storage.Save(buffer, name);
+        }
+
+        Db.Documents.Add(document);
+        await Db.SaveChangesAsync();
+
+        return document;
+    }
+}

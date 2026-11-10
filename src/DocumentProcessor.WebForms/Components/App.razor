@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    @* Site-wide head links carried over from Site.Master, in the master's order. *@
+    <link rel="stylesheet" href="@Assets["Content/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    @* The legacy master appended ?v=<last-write ticks>; MapStaticAssets fingerprints via @Assets instead. *@
+    <link id="SiteStylesheet" rel="stylesheet" href="@Assets["Content/Site.css"]" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <ImportMap />
+    @* Pages choose their own render mode (Default is InteractiveServer); the error page stays
+       statically rendered so UseExceptionHandler / UseStatusCodePagesWithReExecute can render it. *@
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <script src="@Assets["Scripts/bootstrap.bundle.min.js"]"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>

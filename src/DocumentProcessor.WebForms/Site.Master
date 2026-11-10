@@ -1,0 +1,54 @@
+<%@ Master Language="C#" AutoEventWireup="true" CodeBehind="Site.Master.cs" Inherits="DocumentProcessor.WebForms.SiteMaster" %>
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head runat="server">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+        <asp:ContentPlaceHolder ID="TitleContent" runat="server">Document Processor</asp:ContentPlaceHolder>
+    </title>
+    <link rel="stylesheet" href="~/Content/bootstrap.min.css" runat="server" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link id="SiteStylesheet" rel="stylesheet" href="~/Content/Site.css" runat="server" />
+    <link rel="icon" type="image/png" href="~/favicon.png" runat="server" />
+</head>
+<body>
+    <form id="MainForm" runat="server">
+        <asp:ScriptManager ID="MainScriptManager" runat="server" />
+
+        <header class="app-bar">
+            <div class="app-brand">
+                <span class="app-brand-mark"><i class="bi bi-stars"></i></span>
+                <span>Document Processor</span>
+            </div>
+
+            <%-- Reports the engine the app is actually connected to; flips to the PostgreSQL
+                 styling once the connection string points at Aurora. --%>
+            <div class="app-bar-pills">
+                <span class="runtime-pill">
+                    <i class="bi bi-cpu"></i>
+                    <asp:Literal ID="RuntimePillText" runat="server" />
+                </span>
+                <span id="DatabasePill" runat="server" class="db-pill">
+                    <i id="DatabasePillIcon" runat="server" class="bi bi-database"></i>
+                    <asp:Literal ID="DatabasePillText" runat="server" />
+                </span>
+            </div>
+        </header>
+
+        <main class="app-main">
+            <asp:ContentPlaceHolder ID="MainContent" runat="server" />
+        </main>
+
+        <footer class="app-footer">
+            Config: <asp:Literal ID="CredentialSourceText" runat="server" />
+            <span class="app-footer-separator">&middot;</span>
+            Summaries stored in <asp:Literal ID="ProviderNameText" runat="server" />
+        </footer>
+
+        <script src="<%= ResolveUrl("~/Scripts/bootstrap.bundle.min.js") %>"></script>
+    </form>
+</body>
+</html>
