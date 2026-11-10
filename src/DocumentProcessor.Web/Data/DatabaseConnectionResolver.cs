@@ -2,12 +2,12 @@ using System.Text.Json;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
 using DocumentProcessor.Web.Configuration;
-using Microsoft.Data.SqlClient;
+using Npgsql;
 
 namespace DocumentProcessor.Web.Data;
 
 /// <summary>
-/// Resolves the SQL Server connection string at startup, either from configuration or
+/// Resolves the PostgreSQL connection string at startup, either from configuration or
 /// from AWS Secrets Manager. Runs before the DI container exists, so it takes no services.
 /// </summary>
 public static class DatabaseConnectionResolver
@@ -59,19 +59,19 @@ public static class DatabaseConnectionResolver
         using var json = JsonDocument.Parse(value.SecretString);
         var root = json.RootElement;
 
-        var builder = new SqlConnectionStringBuilder
+        var builder = new NpgsqlConnectionStringBuilder
         {
-            DataSource = $"{Field(root, "host")},{Field(root, "port")}",
-            InitialCatalog = Field(root, "dbname"),
-            UserID = Field(root, "username"),
+            Host = Field(root, "host"),
+            Port = int.Parse(Field(root, "port")),
+            Database = Field(root, "dbname"),
+            Username = Field(root, "username"),
             Password = Field(root, "password"),
-            TrustServerCertificate = true,
-            Encrypt = true
+            SearchPath = "dps_dbo"
         };
 
         return new DatabaseConnection(
             builder.ConnectionString,
-            new DatabaseInfo(DatabaseProvider.SqlServer, "AWS Secrets Manager", builder.DataSource));
+            new DatabaseInfo(DatabaseProvider.PostgreSql, "AWS Secrets Manager", $"{builder.Host}:{builder.Port}"));
     }
 
     /// <summary>
@@ -88,7 +88,8 @@ public static class DatabaseConnectionResolver
     {
         if (DetectProvider(connectionString) is DatabaseProvider.SqlServer)
         {
-            return new SqlConnectionStringBuilder(connectionString).DataSource;
+            var b = new NpgsqlConnectionStringBuilder(connectionString);
+            return b.Port != 5432 ? $"{b.Host}:{b.Port}" : b.Host ?? "unknown";
         }
 
         var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
